@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>台灣匯率即時監控系統 (雙向換算版)</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --primary: #2c3e50;
+            --accent: #3498db;
+            --bg: #f4f7f6;
+            --card-bg: #ffffff;
+            --up: #e74c3c;
+            --down: #27ae60;
+        }
+
+        body {
+            font-family: 'Segoe UI', Microsoft JhengHei, sans-serif;
+            background-color: var(--bg);
+            margin: 0;
+            padding: 20px;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        h1, h2 { text-align: center; color: var(--primary); }
+
+        /* 卡片區域 */
+        .dashboard {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+
+        .card {
+            background: var(--card-bg);
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            text-align: center;
+            transition: transform 0.2s;
+        }
+
+        .card:hover { transform: translateY(-3px); }
+        .currency-name { font-weight: bold; color: #777; font-size: 0.9em; }
+        .rate-value { font-size: 1.4em; font-weight: bold; margin: 10px 0; }
+        .trend { font-size: 0.8em; }
+        .up { color: var(--up); }
+        .down { color: var(--down); }
+
+        /* 轉換器區域 */
+        .converter-section, .history-section {
+            background: var(--card-bg);
+            padding: 25px;
+            border-radius: 10px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        .converter-box {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+            justify-content: center;
+            margin-top: 20px;
+        }
+
+        input, select, button {
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 1rem;
+        }
+
+        /* 交換按鈕樣式 */
+        .swap-btn {
+            background-color: #f39c12;
+            color: white;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2em;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        .swap-btn:hover { background-color: #e67e22; }
+
+        .action-btn {
+            background-color: var(--accent);
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        .action-btn:hover { background-color: #2980b9; }
+        
+        .result-display {
+            margin-top: 15px;
+            font-size: 1.2em;
+            text-align: center;
+            font-weight: bold;
+            color: var(--primary);
+        }
+
+        .timestamp {
+            font-size: 0.8em;
+            color: #999;
+            text-align: center;
+            margin-top: 5px;
+        }
+
+        /* 圖表區域 */
+        .chart-controls {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 350px;
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>台灣匯率即時監控中心</h1>
+    <p style="text-align: center; color: #666; font-size: 0.9em;">資料更新頻率：每秒 (模擬數據)</p>
+
+    <div class="dashboard" id="rateDashboard">
+        </div>
+
+    <div class="converter-section">
+        <h2>💰 即時匯率試算</h2>
+        <div class="converter-box">
+            <input type="number" id="amount" value="1000" min="0" oninput="calculate()">
+            
+            <select id="fromCurrency" onchange="calculate()">
+                </select>
+            
+            <button class="swap-btn" onclick="swapCurrencies()" title="交換幣別">⇄</button>
+            
+            <select id="toCurrency" onchange="calculate()">
+                </select>
+        </div>
+        <div class="result-display" id="conversionResult">正在載入匯率...</div>
+        <div class="timestamp" id="lastUpdate">更新時間：--:--:--</div>
+    </div>
+
+    <div class="history-section">
+        <h2>📈 匯率走勢與歷史查詢</h2>
+        
+        <div class="chart-controls">
+            <button class="action-btn" onclick="updateChartRange(7)">近 7 天</button>
+            <button class="action-btn" onclick="updateChartRange(30)">近 1 個月</button>
+            <span>|</span>
+            <input type="date" id="historyDate">
+            <button class="action-btn" onclick="queryHistoryDate()">查詢特定日</button>
+        </div>
+
+        <div style="text-align: center; margin-bottom:10px;">
+            當前顯示：<span id="chartCurrencyTitle" style="font-weight:bold; color:var(--accent);">USD (美金)</span> 對 TWD 走勢
+            <select id="chartCurrencySelect" onchange="changeChartCurrency(this.value)" style="margin-left:10px; padding:5px;">
+                </select>
+        </div>
+
+        <div class="chart-container">
+            <canvas id="rateChart"></canvas>
+        </div>
+    </div>
+</div>
+
+<script>
+    // --- 1. 設定與初始化資料 (無 JPY) ---
+    const currencies = {
+        'USD': { name: '美金', baseRate: 31.5 },
+        'EUR': { name: '歐元', baseRate: 34.2 },
+        'CNY': { name: '人民幣', baseRate: 4.35 },
+        'KRW': { name: '韓元', baseRate: 0.024 },
+        'AUD': { name: '澳幣', baseRate: 20.8 }
+    };
+
+    // 儲存當前即時匯率 (相對於 TWD)
+    let currentRates = {};
+    Object.keys(currencies).forEach(key => {
+        currentRates[key] = currencies[key].baseRate;
+    });
+    // TWD 自身匯率永遠是 1
+    currentRates['TWD'] = 1;
+
+    // --- 2. 模擬後端：每秒更新匯率邏輯 ---
+    function simulateLiveRates() {
+        const now = new Date();
+        const timeString = now.toLocaleTimeString();
+
+        Object.keys(currencies).forEach(code => {
+            const volatility = currencies[code].baseRate * 0.002; 
+            const change = (Math.random() - 0.5) * volatility;
+            let newRate = currentRates[code] + change;
+            
+            const trendClass = newRate > currentRates[code] ? 'up' : 'down';
+            const arrow = newRate > currentRates[code] ? '▲' : '▼';
+            
+            currentRates[code] = newRate;
+
+            // 更新 Dashboard
+            const card = document.getElementById(`card-${code}`);
+            if(card) {
+                card.querySelector('.rate-value').innerText = newRate.toFixed(4);
+                card.querySelector('.rate-value').className = `rate-value ${trendClass}`;
+                card.querySelector('.trend').innerHTML = `<span class="${trendClass}">${arrow} 1 ${code} ≈ ${newRate.toFixed(4)} TWD</span>`;
+            }
+        });
+
+        document.getElementById('lastUpdate').innerText = `最後更新時間：${timeString}`;
+        calculate(false); // 更新計算結果
+    }
+
+    // --- 3. UI 初始化 ---
+    function initDashboard() {
+        const container = document.getElementById('rateDashboard');
+        const fromSelect = document.getElementById('fromCurrency');
+        const toSelect = document.getElementById('toCurrency');
+        const chartSelect = document.getElementById('chartCurrencySelect');
+
+        container.innerHTML = '';
+        fromSelect.innerHTML = '';
+        toSelect.innerHTML = '';
+        chartSelect.innerHTML = '';
+
+        // 1. 產生下拉選單選項 HTML
+        let optionsHtml = '';
+        // 先加 TWD
+        optionsHtml += `<option value="TWD">TWD (新台幣)</option>`;
+        // 再加其他幣別
+        Object.keys(currencies).forEach(code => {
+            // 建立卡片
+            const card = document.createElement('div');
+            card.className = 'card';
+            card.id = `card-${code}`;
+            card.innerHTML = `
+                <div class="currency-name">${currencies[code].name} (${code})</div>
+                <div class="rate-value">${currencies[code].baseRate}</div>
+                <div class="trend">-</div>
+            `;
+            container.appendChild(card);
+
+            // 累積選項字串
+            optionsHtml += `<option value="${code}">${code} (${currencies[code].name})</option>`;
+        });
+
+        // 2. 填充所有下拉選單
+        fromSelect.innerHTML = optionsHtml;
+        toSelect.innerHTML = optionsHtml;
+        // 圖表選單不需要 TWD (因為是 對TWD 走勢)
+        let chartOptions = '';
+        Object.keys(currencies).forEach(code => {
+            chartOptions += `<option value="${code}">${code} (${currencies[code].name})</option>`;
+        });
+        chartSelect.innerHTML = chartOptions;
+
+        // 3. 設定預設值 (TWD 換 USD)
+        fromSelect.value = 'TWD';
+        toSelect.value = 'USD';
+    }
+
+    // --- 4. 匯率計算機邏輯 (雙向通用版) ---
+    function calculate() {
+        const amount = parseFloat(document.getElementById('amount').value);
+        if (isNaN(amount)) return; // 避免空值錯誤
+
+        const from = document.getElementById('fromCurrency').value;
+        const to = document.getElementById('toCurrency').value;
+        
+        // 核心公式： (金額 * 來源幣匯率) / 目標幣匯率
+        // 例如：100 USD (30) 換 TWD (1) => 100 * 30 / 1 = 3000
+        // 例如：3000 TWD (1) 換 USD (30) => 3000 * 1 / 30 = 100
+        
+        const rateFrom = currentRates[from];
+        const rateTo = currentRates[to];
+        
+        const result = (amount * rateFrom) / rateTo;
+        const exchangeRate = rateFrom / rateTo; // 兩者之間的交叉匯率
+
+        const display = document.getElementById('conversionResult');
+        display.innerHTML = `
+            ${amount} ${from} = <span style="color:#e74c3c">${result.toFixed(2)}</span> ${to}<br>
+            <span style="font-size:0.6em; color:#666">
+                即時匯率: 1 ${from} ≈ ${exchangeRate.toFixed(4)} ${to}
+            </span>
+        `;
+    }
+
+    // 交換幣別功能
+    function swapCurrencies() {
+        const fromSelect = document.getElementById('fromCurrency');
+        const toSelect = document.getElementById('toCurrency');
+        
+        const temp = fromSelect.value;
+        fromSelect.value = toSelect.value;
+        toSelect.value = temp;
+        
+        calculate(); // 立即重新計算
+    }
+
+    // --- 5. 圖表邏輯 (Chart.js) ---
+    let myChart = null;
+    let currentChartCurrency = 'USD';
+
+    function initChart() {
+        const ctx = document.getElementById('rateChart').getContext('2d');
+        myChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: `匯率走勢`,
+                    data: [],
+                    borderColor: '#3498db',
+                    backgroundColor: 'rgba(52, 152, 219, 0.1)',
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { grid: { display: false } },
+                    y: { beginAtZero: false }
+                }
+            }
+        });
+        updateChartRange(7);
+    }
+
+    function generateHistoryData(days) {
+        const labels = [];
+        const data = [];
+        const base = currencies[currentChartCurrency].baseRate;
+        for (let i = days; i >= 0; i--) {
+            const d = new Date();
+            d.setDate(d.getDate() - i);
+            labels.push(d.toLocaleDateString());
+            const randomVar = (Math.random() - 0.5) * (base * 0.05); 
+            data.push(base + randomVar);
+        }
+        return { labels, data };
+    }
+
+    function updateChartRange(days) {
+        const history = generateHistoryData(days);
+        myChart.data.labels = history.labels;
+        myChart.data.datasets[0].data = history.data;
+        myChart.data.datasets[0].label = `${currentChartCurrency}/TWD`;
+        myChart.update();
+    }
+
+    function changeChartCurrency(currency) {
+        currentChartCurrency = currency;
+        document.getElementById('chartCurrencyTitle').innerText = `${currency} (${currencies[currency].name})`;
+        updateChartRange(7);
+    }
+
+    function queryHistoryDate() {
+        const dateInput = document.getElementById('historyDate').value;
+        if (!dateInput) { alert("請選擇日期"); return; }
+        const base = currencies[currentChartCurrency].baseRate;
+        const randomRate = base + (Math.random() - 0.5) * (base * 0.03);
+        alert(`${dateInput} 當日 \n${currentChartCurrency} 對 TWD 平均匯率為：${randomRate.toFixed(4)}`);
+    }
+
+    // --- 啟動 ---
+    window.onload = function() {
+        initDashboard(); 
+        initChart();
+        setInterval(simulateLiveRates, 1000); 
+        simulateLiveRates();
+    };
+
+</script>
+
+</body>
+</html>
